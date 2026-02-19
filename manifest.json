@@ -1,0 +1,18 @@
+
+{
+  "name": "台股智謀 AI 智慧投資診斷儀",
+  "short_name": "台股智謀",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "description": "專業台股 AI 投資診斷工具",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2103/2103633.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
