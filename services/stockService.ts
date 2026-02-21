@@ -324,9 +324,7 @@ async function fetchYahooQuote(sid: string, marketType: string = 'TSE') {
   return throttledFetch(async () => {
     try {
       const symbol = toYahooSymbol(sid, marketType);
-      const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=2d&interval=1d`;
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-      const res = await fetch(proxyUrl);
+      const res = await fetch(`/api/proxy/yahoo?symbol=${encodeURIComponent(symbol)}&range=2d&interval=1d`);
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const json = await res.json();
       const result = json.chart?.result?.[0];
@@ -352,9 +350,7 @@ async function fetchFugleQuote(sid: string) {
 
   return throttledFetch(async () => {
     try {
-      const response = await fetch(`https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/${sid}`, {
-        headers: { "X-API-KEY": FUGLE_API_KEY }
-      });
+      const response = await fetch(`/api/proxy/fugle/${sid}`);
       if (!response.ok) {
         if (response.status === 429) console.warn("Fugle API Rate Limit Hit");
         return null;
@@ -374,11 +370,9 @@ async function fetchFugleQuote(sid: string) {
 }
 
 async function fetchFinMindData(dataset: string, sid: string, startDate: string) {
-  const url = `${FINMIND_API_URL}?dataset=${dataset}&data_id=${sid}&start_date=${startDate}`;
-  
   return throttledFetch(async () => {
     try {
-      const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
+      const res = await fetch(`/api/proxy/finmind?dataset=${dataset}&data_id=${sid}&start_date=${startDate}`);
       if (res.ok) {
         const json = await res.json();
         if (json.data && json.data.length > 0) return json.data;
@@ -392,10 +386,8 @@ async function fetchFinMindData(dataset: string, sid: string, startDate: string)
 
 async function getMarketState() {
   const symbol = "^TWII";
-  const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=2mo&interval=1d`;
-  const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
   try {
-    const res = await fetch(proxyUrl);
+    const res = await fetch(`/api/proxy/yahoo?symbol=${encodeURIComponent(symbol)}&range=2mo&interval=1d`);
     const json = await res.json();
     const result = json.chart?.result?.[0];
     const close = result?.indicators?.quote?.[0]?.close || [];
