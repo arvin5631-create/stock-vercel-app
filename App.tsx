@@ -364,7 +364,7 @@ const App: React.FC = () => {
     const timer = setInterval(() => {
       refreshRef.current();
       scanRef.current();
-    }, 180000); 
+    }, 300000); // 延長至 5 分鐘更新一次
     scanMarket(false);
     return () => clearInterval(timer);
   }, []);
@@ -454,7 +454,9 @@ const App: React.FC = () => {
       
       showToast("AI 深度稽核完成並已快存");
     } catch (e: any) { 
-        if (e.message?.includes("entity was not found")) {
+        if (e.message?.includes("冷卻") || e.message?.includes("額度")) {
+            showToast(e.message);
+        } else if (e.message?.includes("entity was not found")) {
             showToast("金鑰失效，請重選");
             setHasCustomKey(false);
         } else {
