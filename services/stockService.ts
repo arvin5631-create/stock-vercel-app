@@ -752,7 +752,7 @@ export const getMarketPulse = async (): Promise<MarketPulse> => {
     { name: "費城半導體", val: sox?.price.toLocaleString() || "0", change: sox?.changePercent || 0, color: getColor(sox?.change || 0) }
   ];
 
-  const sectorNames = Object.keys(SECTOR_MAP);
+  const sectorNames = Object.keys(SECTOR_MAP).slice(0, 3); // 初始只掃描前 3 個板塊，減少負載
   const sectorResults: any[] = [];
 
   for (const name of sectorNames) {
