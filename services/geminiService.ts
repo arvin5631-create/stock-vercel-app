@@ -20,12 +20,13 @@ const getModelName = async (taskType: 'fast' | 'pro' = 'fast') => {
   // 檢查是否有透過 AI Studio 擴充功能選取 Key (開發環境專用)
   const hasKey = await (window as any).aistudio?.hasSelectedApiKey();
   
-  // 若有選取 Key 或者是 Vercel 環境 (通常有設定 API Key)，則允許使用 Pro 模型
-  // 這裡做一個簡單判斷：如果有設定 VITE_API_KEY，也視為有權限使用 Pro
+  // 優先使用 gemini-3-flash-preview，因為它的免費額度較高且較穩定
+  // 只有在使用者明確有自備 Key 且需要 Pro 時才切換
   const hasEnvKey = !!(import.meta as any).env?.VITE_API_KEY;
   
   if (hasKey || hasEnvKey) {
-    return taskType === 'pro' ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
+    // 即使是 pro 任務，目前也先回傳 flash 以確保穩定性，除非您確定 Pro 額度充足
+    return 'gemini-3-flash-preview';
   }
   return 'gemini-3-flash-preview';
 };
