@@ -60,7 +60,19 @@ export const discoverTrendingStocks = async (excludedIds: string[]): Promise<str
   }
 };
 
+// === AI 頻率限制與冷卻系統 ===
+let lastAIGenTime = 0;
+const AI_COOLDOWN = 35000; // 35 秒冷卻時間 (Gemini Free Tier 限制)
+
 export const generateAIAudit = async (data: AnalysisDetail): Promise<{text: string, sources: any[]}> => {
+  const now = Date.now();
+  const timeSinceLast = now - lastAIGenTime;
+  
+  if (timeSinceLast < AI_COOLDOWN) {
+    const waitSec = Math.ceil((AI_COOLDOWN - timeSinceLast) / 1000);
+    throw new Error(`AI 正在冷卻中，請在 ${waitSec} 秒後再試。`);
+  }
+
   const ai = getAIClient();
   const model = await getModelName('pro');
   
@@ -178,12 +190,17 @@ export const generateAIAudit = async (data: AnalysisDetail): Promise<{text: stri
       uri: chunk.web?.uri
     })) || [];
 
+    lastAIGenTime = Date.now(); // 成功後更新時間
     return {
       text: response.text || "診斷失敗",
       sources: sources
     };
   } catch (error: any) {
     console.error("AI Analysis Error:", error);
+    if (error.message?.includes("429") || error.message?.includes("quota")) {
+      lastAIGenTime = Date.now(); // 遇到 429 也視為一次嘗試，啟動冷卻
+      throw new Error("AI 額度已達上限，請稍候 35 秒再試。");
+    }
     throw error;
   }
 };

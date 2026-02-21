@@ -6,6 +6,43 @@ import { ALL_STOCK_MAP, SECTOR_MAP, getColor, roundToTaiwanTick, getSectorName }
 const FUGLE_API_KEY = process.env.FUGLE_API_KEY || (import.meta as any).env?.VITE_FUGLE_API_KEY || "NzQxN2Q5ZTQtNGMwZC00ZTQyLWI1OGEtODNmNmYwODk0NmRmIGY5MzU2ZDQzLWZjNzctNDdlYS04NjY4LWZiNjhmMjQ3M2FjMw==";
 const FINMIND_API_URL = "https://api.finmindtrade.com/api/v4/data";
 
+// === 請求排隊與頻率限制系統 (Request Throttling) ===
+const requestQueue: (() => Promise<any>)[] = [];
+let isProcessingQueue = false;
+const MIN_REQUEST_GAP = 800; // 每個請求之間至少間隔 800ms
+
+const processQueue = async () => {
+  if (isProcessingQueue || requestQueue.length === 0) return;
+  isProcessingQueue = true;
+  while (requestQueue.length > 0) {
+    const task = requestQueue.shift();
+    if (task) {
+      await task();
+      await new Promise(resolve => setTimeout(resolve, MIN_REQUEST_GAP));
+    }
+  }
+  isProcessingQueue = false;
+};
+
+const throttledFetch = <T>(fetchFn: () => Promise<T>): Promise<T> => {
+  return new Promise((resolve, reject) => {
+    requestQueue.push(async () => {
+      try {
+        const result = await fetchFn();
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      }
+    });
+    processQueue();
+  });
+};
+
+// === 報價數據快取 (Live Quote Caching) ===
+// 避免在同一個渲染週期內重複抓取同一支股票
+const QUOTE_CACHE: Record<string, { data: any, timestamp: number }> = {};
+const QUOTE_CACHE_DURATION = 30000; // 30 秒內不重複抓取即時報價
+
 // === 靜態數據快取系統 (Static Data Caching) ===
 // 盤中不會變動的數據 (財報、籌碼、昨日以前的K線)，存放在這裡避免重複 API 請求
 interface StaticAnalysisData {
@@ -277,50 +314,80 @@ const getDateOffset = (days: number) => {
 };
 
 async function fetchYahooQuote(sid: string, marketType: string = 'TSE') {
+  const cacheKey = `yahoo_${sid}`;
+  if (QUOTE_CACHE[cacheKey] && Date.now() - QUOTE_CACHE[cacheKey].timestamp < QUOTE_CACHE_DURATION) {
+    return QUOTE_CACHE[cacheKey].data;
+  }
+
   const toYahooSymbol = (s: string, mt: string) => s.includes("^") ? s : (mt === 'OTC' ? `${s}.TWO` : `${s}.TW`);
-  try {
-    const symbol = toYahooSymbol(sid, marketType);
-    const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=2d&interval=1d`;
-    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-    const res = await fetch(proxyUrl);
-    const json = await res.json();
-    const result = json.chart?.result?.[0];
-    const meta = result?.meta;
-    const price = meta?.regularMarketPrice || 0;
-    const prevClose = meta?.chartPreviousClose || price;
-    const change = price - prevClose;
-    const changePercent = prevClose !== 0 ? (change / prevClose) * 100 : 0;
-    const apiName = meta?.shortName || "";
-    return { price: price, change: change, changePercent: changePercent, vol: result?.indicators?.quote?.[0]?.volume?.pop() || 0, name: resolveStockName(sid, apiName), market: marketType };
-  } catch (e) { return null; }
+  
+  return throttledFetch(async () => {
+    try {
+      const symbol = toYahooSymbol(sid, marketType);
+      const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=2d&interval=1d`;
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+      const res = await fetch(proxyUrl);
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+      const json = await res.json();
+      const result = json.chart?.result?.[0];
+      const meta = result?.meta;
+      const price = meta?.regularMarketPrice || 0;
+      const prevClose = meta?.chartPreviousClose || price;
+      const change = price - prevClose;
+      const changePercent = prevClose !== 0 ? (change / prevClose) * 100 : 0;
+      const apiName = meta?.shortName || "";
+      const data = { price: price, change: change, changePercent: changePercent, vol: result?.indicators?.quote?.[0]?.volume?.pop() || 0, name: resolveStockName(sid, apiName), market: marketType };
+      
+      QUOTE_CACHE[cacheKey] = { data, timestamp: Date.now() };
+      return data;
+    } catch (e) { return null; }
+  });
 }
 
 async function fetchFugleQuote(sid: string) {
-  try {
-    const response = await fetch(`https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/${sid}`, {
-      headers: { "X-API-KEY": FUGLE_API_KEY }
-    });
-    if (!response.ok) return null;
-    const d = await response.json();
-    const price = d.lastTrade?.price || d.closePrice || 0;
-    const prevClose = d.previousClose || (price - (d.quote?.change || 0));
-    const change = d.quote?.change || (price - prevClose);
-    const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
-    const apiName = d.nameZhTw || "";
-    return { id: sid, price: price, change: change, changePercent: changePercent, vol: d.quote?.totalVolume || 0, name: resolveStockName(sid, apiName), market: d.market };
-  } catch (e) { return null; }
+  const cacheKey = `fugle_${sid}`;
+  if (QUOTE_CACHE[cacheKey] && Date.now() - QUOTE_CACHE[cacheKey].timestamp < QUOTE_CACHE_DURATION) {
+    return QUOTE_CACHE[cacheKey].data;
+  }
+
+  return throttledFetch(async () => {
+    try {
+      const response = await fetch(`https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/${sid}`, {
+        headers: { "X-API-KEY": FUGLE_API_KEY }
+      });
+      if (!response.ok) {
+        if (response.status === 429) console.warn("Fugle API Rate Limit Hit");
+        return null;
+      }
+      const d = await response.json();
+      const price = d.lastTrade?.price || d.closePrice || 0;
+      const prevClose = d.previousClose || (price - (d.quote?.change || 0));
+      const change = d.quote?.change || (price - prevClose);
+      const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+      const apiName = d.nameZhTw || "";
+      const data = { id: sid, price: price, change: change, changePercent: changePercent, vol: d.quote?.totalVolume || 0, name: resolveStockName(sid, apiName), market: d.market };
+      
+      QUOTE_CACHE[cacheKey] = { data, timestamp: Date.now() };
+      return data;
+    } catch (e) { return null; }
+  });
 }
 
 async function fetchFinMindData(dataset: string, sid: string, startDate: string) {
   const url = `${FINMIND_API_URL}?dataset=${dataset}&data_id=${sid}&start_date=${startDate}`;
-  try {
-    const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
-    if (res.ok) {
-      const json = await res.json();
-      if (json.data && json.data.length > 0) return json.data;
-    }
-  } catch (e) {}
-  return [];
+  
+  return throttledFetch(async () => {
+    try {
+      const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data && json.data.length > 0) return json.data;
+      } else if (res.status === 429) {
+        console.warn("FinMind/Proxy Rate Limit Hit");
+      }
+    } catch (e) {}
+    return [];
+  });
 }
 
 async function getMarketState() {
@@ -697,39 +764,32 @@ export const getMarketPulse = async (): Promise<MarketPulse> => {
   const sectorResults: any[] = [];
 
   for (const name of sectorNames) {
-    const ids = (SECTOR_MAP as any)[name].slice(0, 10); 
+    const ids = (SECTOR_MAP as any)[name].slice(0, 6); // 減少掃描數量
     const stocksInSector: StockData[] = [];
 
-    // 這裡我們維持使用 default (full) 模式，因為推薦清單的股票可能不在快取中
-    // 但因為每個板塊只抓少數幾檔，負載尚可接受
-    for (let i = 0; i < ids.length; i += 2) {
-      const batchIds = ids.slice(i, i + 2);
-      const batchResults = await Promise.all(batchIds.map(async (id: string) => {
-        try {
-          // 若該股票已經在快取中 (例如剛才使用者有點過)，會自動加速
-          const detail = await getAnalyze(id, 'fast'); 
-          return {
-            id: id,
-            name: detail.name,
-            price: detail.price_info.price,
-            change: detail.price_info.change,
-            changePercent: detail.price_info.changePercent,
-            score: detail.analysis.score,
-            action: detail.analysis.action
-          } as StockData;
-        } catch (e) {
-          return { id, name: resolveStockName(id), price: 0, change: 0, changePercent: 0, score: 50, action: "觀望" } as StockData;
-        }
-      }));
-      
-      stocksInSector.push(...batchResults);
-      await new Promise(resolve => setTimeout(resolve, 150));
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      try {
+        const detail = await getAnalyze(id, 'fast'); 
+        stocksInSector.push({
+          id: id,
+          name: detail.name,
+          price: detail.price_info.price,
+          change: detail.price_info.change,
+          changePercent: detail.price_info.changePercent,
+          score: detail.analysis.score,
+          action: detail.analysis.action
+        } as StockData);
+      } catch (e) {
+        stocksInSector.push({ id, name: resolveStockName(id), price: 0, change: 0, changePercent: 0, score: 50, action: "觀望" } as StockData);
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 增加單個請求間的延遲
     }
 
     const avgScore = stocksInSector.length > 0 ? Math.round(stocksInSector.reduce((a, b) => a + b.score, 0) / stocksInSector.length) : 50;
     sectorResults.push({ name, score: avgScore, stocks: stocksInSector });
     
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, 2000)); // 板塊間延遲
   }
 
   const allScannedStocks = sectorResults.flatMap(s => s.stocks);
