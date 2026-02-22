@@ -17,18 +17,11 @@ const getAIClient = () => {
 };
 
 const getModelName = async (taskType: 'fast' | 'pro' = 'fast') => {
-  // 檢查是否有透過 AI Studio 擴充功能選取 Key (開發環境專用)
-  const hasKey = await (window as any).aistudio?.hasSelectedApiKey();
-  
-  // 優先使用 gemini-3-flash-preview，因為它的免費額度較高且較穩定
-  // 只有在使用者明確有自備 Key 且需要 Pro 時才切換
-  const hasEnvKey = !!(import.meta as any).env?.VITE_API_KEY;
-  
-  if (hasKey || hasEnvKey) {
-    // 即使是 pro 任務，目前也先回傳 flash 以確保穩定性，除非您確定 Pro 額度充足
-    return 'gemini-3-flash-preview';
-  }
-  return 'gemini-3-flash-preview';
+  console.log(`AI: Requesting model for task: ${taskType}`);
+  // 強制使用 flash 模型，因為 Pro 模型在許多免費帳戶中額度為 0
+  const model = 'gemini-3-flash-preview';
+  console.log(`AI: Selected model: ${model}`);
+  return model;
 };
 
 export const discoverTrendingStocks = async (excludedIds: string[]): Promise<string[]> => {
