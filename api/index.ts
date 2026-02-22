@@ -41,14 +41,33 @@ app.get("/api/proxy/finmind", async (req, res) => {
       return res.status(400).json({ error: "Missing or invalid parameters" });
     }
 
-    console.log(`Backend: Fetching FinMind ${dataset} for ${data_id}`);
-    const url = `https://api.finmindtrade.com/api/v4/data?dataset=${dataset}&data_id=${data_id}&start_date=${start_date || ""}`;
+    const token = process.env.FINMIND_TOKEN;
+    const params = new URLSearchParams({
+      dataset: String(dataset),
+      data_id: String(data_id),
+      start_date: String(start_date || ""),
+    });
+    if (token) params.append("token", token);
+
+    const url = `https://api.finmindtrade.com/api/v4/data?${params.toString()}`;
+    console.log(`Backend: Fetching FinMind: ${url}`);
+    
     const response = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
       }
     });
-    const data = await response.json();
+    
+    const contentType = response.headers.get("content-type");
+    let data;
+    if (contentType && contentType.includes("application/json")) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      console.error(`Backend: FinMind non-JSON response (${response.status}):`, text);
+      return res.status(response.status).json({ error: "Non-JSON response from FinMind", details: text });
+    }
+
     if (!response.ok) {
       console.error(`Backend: FinMind API error ${response.status}:`, data);
     }
