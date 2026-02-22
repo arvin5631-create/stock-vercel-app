@@ -350,7 +350,7 @@ async function fetchFugleQuote(sid: string) {
 
   return throttledFetch(async () => {
     try {
-      const response = await fetch(`/api/proxy/fugle/${sid}`);
+      const response = await fetch(`/api/proxy/fugle/${encodeURIComponent(sid)}`);
       if (!response.ok) {
         if (response.status === 429) console.warn("Fugle API Rate Limit Hit");
         return null;
@@ -370,14 +370,25 @@ async function fetchFugleQuote(sid: string) {
 }
 
 async function fetchFinMindData(dataset: string, sid: string, startDate: string) {
+  // Sanitize sid: remove .TW, .TWO or any non-numeric suffix for FinMind
+  const cleanSid = sid.split('.')[0].replace(/[^0-9]/g, '');
+  
   return throttledFetch(async () => {
     try {
-      const res = await fetch(`/api/proxy/finmind?dataset=${dataset}&data_id=${sid}&start_date=${startDate}`);
+      const params = new URLSearchParams({
+        dataset,
+        data_id: cleanSid,
+        start_date: startDate
+      });
+      const res = await fetch(`/api/proxy/finmind?${params.toString()}`);
       if (res.ok) {
         const json = await res.json();
         if (json.data && json.data.length > 0) return json.data;
       } else if (res.status === 429) {
         console.warn("FinMind/Proxy Rate Limit Hit");
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        console.error(`FinMind API Error ${res.status}:`, errData);
       }
     } catch (e) {}
     return [];
