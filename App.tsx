@@ -518,7 +518,7 @@ const App: React.FC = () => {
             <div className="flex flex-col">
                 <span className="leading-none">台股智謀</span>
                 <div className="flex items-center gap-1.5 mt-1">
-                    <span className="text-blue-500 font-num text-[10px] font-black uppercase tracking-widest">V5.7.1</span>
+                    <span className="text-blue-500 font-num text-[10px] font-black uppercase tracking-widest">V5.8.0</span>
                     <button 
                         onClick={handleOpenKeySelector}
                         className={`p-1 rounded flex items-center gap-1 transition-all ${hasCustomKey ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}
