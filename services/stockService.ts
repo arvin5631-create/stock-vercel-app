@@ -9,7 +9,9 @@ const FINMIND_API_URL = "https://api.finmindtrade.com/api/v4/data";
 // === 請求排隊與頻率限制系統 (Request Throttling) ===
 const requestQueue: (() => Promise<any>)[] = [];
 let isProcessingQueue = false;
-const MIN_REQUEST_GAP = 800; // 每個請求之間至少間隔 800ms
+let MIN_REQUEST_GAP = 1000; // 增加間隔到 1000ms
+let fugleRateLimitUntil = 0;
+let finmindRateLimitUntil = 0;
 
 const processQueue = async () => {
   if (isProcessingQueue || requestQueue.length === 0) return;
@@ -348,11 +350,19 @@ async function fetchFugleQuote(sid: string) {
     return QUOTE_CACHE[cacheKey].data;
   }
 
+  if (Date.now() < fugleRateLimitUntil) {
+    console.warn("Fugle is in cooling down due to rate limit");
+    return null;
+  }
+
   return throttledFetch(async () => {
     try {
       const response = await fetch(`/api/proxy/fugle/${encodeURIComponent(sid)}`);
       if (!response.ok) {
-        if (response.status === 429) console.warn("Fugle API Rate Limit Hit");
+        if (response.status === 429) {
+          console.warn("Fugle API Rate Limit Hit - Cooling down for 60s");
+          fugleRateLimitUntil = Date.now() + 60000;
+        }
         return null;
       }
       const d = await response.json();
@@ -372,7 +382,12 @@ async function fetchFugleQuote(sid: string) {
 async function fetchFinMindData(dataset: string, sid: string, startDate: string) {
   // Sanitize sid: remove .TW, .TWO or any non-numeric suffix for FinMind
   const cleanSid = sid.split('.')[0].replace(/[^0-9]/g, '');
+  if (!cleanSid) return [];
   
+  if (Date.now() < finmindRateLimitUntil) {
+    return [];
+  }
+
   return throttledFetch(async () => {
     try {
       const params = new URLSearchParams({
@@ -384,8 +399,9 @@ async function fetchFinMindData(dataset: string, sid: string, startDate: string)
       if (res.ok) {
         const json = await res.json();
         if (json.data && json.data.length > 0) return json.data;
-      } else if (res.status === 429) {
-        console.warn("FinMind/Proxy Rate Limit Hit");
+      } else if (res.status === 429 || res.status === 402) {
+        console.warn(`FinMind API ${res.status} Hit - Cooling down for 5 minutes`);
+        finmindRateLimitUntil = Date.now() + 300000; // 402/429 則冷卻 5 分鐘
       } else {
         const errData = await res.json().catch(() => ({}));
         console.error(`FinMind API Error ${res.status}:`, errData);
@@ -723,8 +739,22 @@ const isCacheExpired = (timestamp: number) => {
   return false;
 };
 
-// 參數 mode: 'full' (強制更新所有數據) | 'fast' (優先使用快取，只抓現價)
-export const getAnalyze = async (sid: string, mode: 'full' | 'fast' = 'full'): Promise<AnalysisDetail> => {
+const DEFAULT_STATIC_DATA: StaticAnalysisData = {
+    histData: [],
+    perData: [],
+    chipData: [],
+    financialAnalysis: [],
+    revData: [],
+    marketBelowMA20: false,
+    marketContext: { 
+        index_performance: { twii_change: 0, nasdaq_change: 0, sox_change: 0 }, 
+        sector_performance: { sector_name: "市場標的", avg_change: 0, peers: [] } 
+    },
+    timestamp: 0
+};
+
+// 參數 mode: 'full' (強制更新所有數據) | 'fast' (優先使用快取，若無則抓取) | 'pulse' (只用快取，若無則回傳預設值)
+export const getAnalyze = async (sid: string, mode: 'full' | 'fast' | 'pulse' = 'full'): Promise<AnalysisDetail> => {
   // 1. 永遠抓取最新的即時報價 (Fugle / Yahoo)
   let live = await fetchFugleQuote(sid);
   if (!live || live.price === 0) {
@@ -737,17 +767,20 @@ export const getAnalyze = async (sid: string, mode: 'full' | 'fast' = 'full'): P
   // 2. 處理靜態數據 (FinMind, MarketContext)
   let staticData = MEMORY_CACHE[sid];
   
-  // 使用新的驗證邏輯：如果 mode 是 fast，且快取存在，且「未過期 (包含未跨越 15:00)」，才使用快取
+  // 使用新的驗證邏輯：如果 mode 是 fast/pulse，且快取存在，且「未過期」，才使用快取
   const isValid = staticData && !isCacheExpired(staticData.timestamp);
 
-  if (mode === 'full' || !isValid) {
-    // 沒有快取、強制更新、或快取已過期 (含跨越 15:00)：執行重的 Fetch
+  if (mode === 'full' || (!isValid && mode === 'fast')) {
+    // 沒有快取、強制更新、或快取已過期：執行重的 Fetch
     staticData = await fetchStaticAnalysisData(sid);
     MEMORY_CACHE[sid] = staticData; // 寫入快取
+  } else if (!isValid && mode === 'pulse') {
+    // Pulse 模式下若無效快取，則回傳預設值，避免掃描時產生大量 API 請求
+    staticData = DEFAULT_STATIC_DATA;
   }
 
   // 3. 運算核心：合成數據並回傳
-  return computeAnalysis(sid, live, staticData);
+  return computeAnalysis(sid, live, staticData || DEFAULT_STATIC_DATA);
 };
 
 export const getMarketPulse = async (): Promise<MarketPulse> => {
@@ -773,7 +806,7 @@ export const getMarketPulse = async (): Promise<MarketPulse> => {
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
       try {
-        const detail = await getAnalyze(id, 'fast'); 
+        const detail = await getAnalyze(id, 'pulse'); 
         stocksInSector.push({
           id: id,
           name: detail.name,

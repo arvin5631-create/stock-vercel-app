@@ -24,7 +24,43 @@ const getModelName = async (taskType: 'fast' | 'pro' = 'fast') => {
   return model;
 };
 
+// === AI 頻率限制與冷卻系統 ===
+let lastAIGenTime = 0;
+const AI_COOLDOWN = 35000; // 35 秒冷卻時間 (Gemini Free Tier 限制)
+
+// 封裝帶有重試機制的 AI 呼叫
+async function callAIWithRetry(ai: any, params: any, maxRetries = 2): Promise<any> {
+  let lastError: any;
+  for (let i = 0; i <= maxRetries; i++) {
+    try {
+      if (i > 0) {
+        console.log(`AI: Retry attempt ${i}...`);
+        await new Promise(resolve => setTimeout(resolve, 2000 * i)); // 指數退避
+      }
+      return await ai.models.generateContent(params);
+    } catch (error: any) {
+      lastError = error;
+      const msg = error.message || "";
+      // 如果不是 429 或 500 系列錯誤，就不重試
+      if (!msg.includes("429") && !msg.includes("quota") && !msg.includes("500") && !msg.includes("503")) {
+        throw error;
+      }
+      console.warn(`AI: Attempt ${i + 1} failed with rate limit or server error.`);
+    }
+  }
+  throw lastError;
+}
+
 export const discoverTrendingStocks = async (excludedIds: string[]): Promise<string[]> => {
+  const now = Date.now();
+  const timeSinceLast = now - lastAIGenTime;
+  
+  if (timeSinceLast < AI_COOLDOWN) {
+    const waitSec = Math.ceil((AI_COOLDOWN - timeSinceLast) / 1000);
+    console.warn(`Discovery skipped: AI is cooling down (${waitSec}s remaining)`);
+    return [];
+  }
+
   const ai = getAIClient();
   const model = await getModelName('fast');
   
@@ -37,7 +73,7 @@ export const discoverTrendingStocks = async (excludedIds: string[]): Promise<str
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await callAIWithRetry(ai, {
       model: model,
       contents: prompt,
       config: {
@@ -53,10 +89,6 @@ export const discoverTrendingStocks = async (excludedIds: string[]): Promise<str
     return [];
   }
 };
-
-// === AI 頻率限制與冷卻系統 ===
-let lastAIGenTime = 0;
-const AI_COOLDOWN = 35000; // 35 秒冷卻時間 (Gemini Free Tier 限制)
 
 export const generateAIAudit = async (data: AnalysisDetail): Promise<{text: string, sources: any[]}> => {
   const now = Date.now();
@@ -171,7 +203,7 @@ export const generateAIAudit = async (data: AnalysisDetail): Promise<{text: stri
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await callAIWithRetry(ai, {
       model: model,
       contents: `數據如下：\n${quantContext}\n\n指令如下：\n${instruction}`,
       config: {
@@ -191,9 +223,10 @@ export const generateAIAudit = async (data: AnalysisDetail): Promise<{text: stri
     };
   } catch (error: any) {
     console.error("AI Analysis Error:", error);
-    if (error.message?.includes("429") || error.message?.includes("quota")) {
+    const msg = error.message || "";
+    if (msg.includes("429") || msg.includes("quota")) {
       lastAIGenTime = Date.now(); // 遇到 429 也視為一次嘗試，啟動冷卻
-      throw new Error("AI 額度已達上限，請稍候 35 秒再試。");
+      throw new Error("AI 額度已達上限或搜尋引擎繁忙，請稍候 35 秒再試。");
     }
     throw error;
   }

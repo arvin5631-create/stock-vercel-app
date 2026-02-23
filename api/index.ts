@@ -69,7 +69,7 @@ app.get("/api/proxy/finmind", async (req, res) => {
     }
 
     if (!response.ok) {
-      console.error(`Backend: FinMind API error ${response.status}:`, data);
+      console.error(`Backend: FinMind API error ${response.status}:`, JSON.stringify(data));
     }
     res.status(response.status).json(data);
   } catch (error: any) {

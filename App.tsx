@@ -455,13 +455,18 @@ const App: React.FC = () => {
       showToast("AI 深度稽核完成並已快存");
     } catch (e: any) { 
         console.error("AI Generation Error in App:", e);
-        if (e.message?.includes("冷卻") || e.message?.includes("額度")) {
-            showToast(e.message);
-        } else if (e.message?.includes("entity was not found")) {
+        const msg = e.message || "";
+        if (msg.includes("冷卻") || msg.includes("額度") || msg.includes("上限") || msg.includes("繁忙")) {
+            if (msg.includes("額度") || msg.includes("上限")) {
+                showToast(`${msg} (建議點擊左上角串接個人金鑰以避開共用限制)`);
+            } else {
+                showToast(msg);
+            }
+        } else if (msg.includes("entity was not found")) {
             showToast("金鑰失效，請重選");
             setHasCustomKey(false);
         } else {
-            showToast(`AI 專家連線異常: ${e.message || '未知錯誤'}`);
+            showToast(`AI 專家連線異常: ${msg || '未知錯誤'}`);
         }
     } finally { setIsGenerating(false); }
   };
