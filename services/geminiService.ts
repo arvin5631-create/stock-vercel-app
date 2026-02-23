@@ -3,14 +3,14 @@ import { GoogleGenAI } from "@google/genai";
 import { AnalysisDetail } from "../types";
 
 const getAIClient = () => {
-  // 相容性處理：
-  // 1. process.env.API_KEY: 用於特定開發環境或 Webpack
-  // 2. import.meta.env.VITE_API_KEY: 用於 Vite 建置與 Vercel 部屬
-  // 注意：在 Vercel 設定環境變數時，請使用 "VITE_API_KEY"
-  const apiKey = process.env.API_KEY || (import.meta as any).env?.VITE_API_KEY;
+  // 優先順序：
+  // 1. process.env.API_KEY: 使用者透過平台對話框選取的個人金鑰 (自動注入)
+  // 2. process.env.GEMINI_API_KEY: 平台預設提供的 Gemini API 金鑰
+  // 3. import.meta.env.VITE_API_KEY: 本地開發或 Vercel 部署環境變數
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_API_KEY;
   
   if (!apiKey) {
-    console.warn("未檢測到 API Key，AI 功能可能無法正常運作。請確認環境變數 VITE_API_KEY 已設定。");
+    console.warn("未檢測到 API Key，AI 功能可能無法正常運作。請確認環境變數 GEMINI_API_KEY 或 VITE_API_KEY 已設定。");
   }
 
   return new GoogleGenAI({ apiKey: apiKey || '' });
