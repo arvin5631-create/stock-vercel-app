@@ -454,13 +454,14 @@ const App: React.FC = () => {
       
       showToast("AI 深度稽核完成並已快存");
     } catch (e: any) { 
+        console.error("AI Generation Error in App:", e);
         if (e.message?.includes("冷卻") || e.message?.includes("額度")) {
             showToast(e.message);
         } else if (e.message?.includes("entity was not found")) {
             showToast("金鑰失效，請重選");
             setHasCustomKey(false);
         } else {
-            showToast("AI 專家連線超時");
+            showToast(`AI 專家連線異常: ${e.message || '未知錯誤'}`);
         }
     } finally { setIsGenerating(false); }
   };
