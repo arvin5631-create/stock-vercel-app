@@ -126,11 +126,12 @@ const App: React.FC = () => {
 
   const handleOpenKeySelector = async () => {
     try {
+      showToast("正在開啟平台金鑰選取器...");
       await (window as any).aistudio?.openSelectKey();
       setHasCustomKey(true);
       showToast("金鑰已串接，將優先使用個人配額");
     } catch (e) {
-      showToast("金鑰選取取消");
+      showToast("已取消金鑰選取");
     }
   };
 
